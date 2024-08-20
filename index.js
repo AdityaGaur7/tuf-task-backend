@@ -2,7 +2,7 @@ require('dotenv').config(); // Load environment variables from .env file
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const mysql = require('mysql2');
+const { MongoClient } = require('mongodb');
 
 // Initialize Express
 const app = express();
@@ -12,56 +12,69 @@ const port = process.env.PORT || 5000; // Use the port from .env or default to 5
 app.use(cors());
 app.use(bodyParser.json());
 
-// MySQL Connection
-const db = mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    port: process.env.DB_PORT
-});
+// MongoDB Connection
+const uri = process.env.MONGODB_URI; // Use MongoDB URI from .env file
+const client = new MongoClient(uri);
+let db;
 
-db.connect((err) => {
+client.connect(err => {
     if (err) throw err;
-    console.log('Connected to MySQL database');
+    db = client.db('flashcards'); // Choose your database name
+    console.log('Connected to MongoDB database');
 });
 
 // API Routes
-app.get('/api/flashcards', (req, res) => {
-    db.query('SELECT * FROM flashcards', (err, results) => {
-        if (err) throw err;
-        res.json(results);
-    });
+app.get('/api/flashcards', async (req, res) => {
+    try {
+        const flashcards = await db.collection('flashcards').find({}).toArray();
+        res.json(flashcards);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
-app.get('/', (req, res) => {
-    
-        res.send("Hello World ! backend is working");
-    });
 
-
-app.post('/api/flashcards', (req, res) => {
+app.post('/api/flashcards', async (req, res) => {
     const { question, answer } = req.body;
-    db.query('INSERT INTO flashcards (question, answer) VALUES (?, ?)', [question, answer], (err, results) => {
-        if (err) throw err;
-        res.json({ id: results.insertId, question, answer });
-    });
+    try {
+        const result = await db.collection('flashcards').insertOne({ question, answer });
+        res.json({ id: result.insertedId, question, answer });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.put('/api/flashcards/:id', (req, res) => {
+app.put('/api/flashcards/:id', async (req, res) => {
     const { id } = req.params;
     const { question, answer } = req.body;
-    db.query('UPDATE flashcards SET question = ?, answer = ? WHERE id = ?', [question, answer, id], (err) => {
-        if (err) throw err;
+    try {
+        const result = await db.collection('flashcards').updateOne(
+            { _id: new MongoClient.ObjectId(id) },
+            { $set: { question, answer } }
+        );
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({ message: 'Flashcard not found' });
+        }
         res.json({ id, question, answer });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.delete('/api/flashcards/:id', (req, res) => {
+app.delete('/api/flashcards/:id', async (req, res) => {
     const { id } = req.params;
-    db.query('DELETE FROM flashcards WHERE id = ?', [id], (err) => {
-        if (err) throw err;
+    try {
+        const result = await db.collection('flashcards').deleteOne({ _id: new MongoClient.ObjectId(id) });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Flashcard not found' });
+        }
         res.json({ message: 'Flashcard deleted' });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/', (req, res) => {
+    res.send("Hello World ! backend is working");
 });
 
 // Start Server
